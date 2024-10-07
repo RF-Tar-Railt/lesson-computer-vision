@@ -1,0 +1,20 @@
+[project]
+name = "cvision-workspace"
+version = "0.0.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "RF-Tar-Railt", email = "rf_tar_railt@qq.com"},
+]
+dependencies = [
+    "opencv-contrib-python>=4.10.0.84",
+    "matplotlib>=3.9.2",
+    "imutils>=0.5.4",
+    "easyocr>=1.7.2",
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[tool.pdm]
+distribution = false
