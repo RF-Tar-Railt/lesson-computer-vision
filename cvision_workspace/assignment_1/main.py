@@ -31,8 +31,8 @@ def decode_predictions(scores, geometry, conf_threshold=0.5):
 
             end_x = int(offset_x + (cos * x_data1[x]) + (sin * x_data2[x]))
             end_y = int(offset_y - (sin * x_data1[x]) + (cos * x_data2[x]))
-            start_x = int(end_x - w)
-            start_y = int(end_y - h)
+            start_x = max(int(end_x - w), 0)
+            start_y = max(int(end_y - h), 0)
 
             rects.append((start_x, start_y, end_x, end_y))
             confidences.append(scores_data[x])
@@ -42,10 +42,10 @@ def decode_predictions(scores, geometry, conf_threshold=0.5):
 
 reader = easyocr.Reader(['en'])
 # Load the pre-trained EAST text detector
-net = cv2.dnn.readNet('frozen_east_text_detection.pb')
+net = cv2.dnn.readNet('./frozen_east_text_detection.pb')
 # Load the image
 st = time.time()
-image = cv2.imread('sample.jpeg')
+image = cv2.imread('sample1.jpeg')
 orig = image.copy()
 origH, origW = image.shape[:2]
 
@@ -60,16 +60,11 @@ image = cv2.resize(image, (newW, newH))
 # Convert to grayscale
 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-kernel = np.ones((3, 3), np.int8)
-erosion = cv2.erode(gray, kernel, iterations=1)
-kernel1 = np.ones((4, 4), np.int8)
-dilation = cv2.dilate(erosion, kernel1, iterations=1)
-
-
 # Apply blurring
-blurred = cv2.GaussianBlur(dilation, (5, 5), 0)
+blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 # Apply thresholding
 _, thresh = cv2.threshold(blurred, 80, 255, cv2.THRESH_BINARY_INV)
+
 cv2.imshow('thresh', thresh)
 
 # Traditional method, find contours and draw bounding boxes
@@ -81,9 +76,10 @@ cv2.imshow('thresh', thresh)
 #     x, y, w, h = cv2.boundingRect(cnt)
 #     cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
+input_ = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
 
 # Prepare the image for the network
-blob = cv2.dnn.blobFromImage(cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR), 1.0, (W, H), (123.68, 116.78, 103.94), False, False)
+blob = cv2.dnn.blobFromImage(input_, 1.0, (W, H), (123.68, 116.78, 103.94), False, False)
 net.setInput(blob)
 
 # Get the output layer names
@@ -96,7 +92,8 @@ layer_names = [
 scores, geometry = net.forward(layer_names)
 
 (rects, confidences) = decode_predictions(scores, geometry)
-indices = cv2.dnn.NMSBoxes(rects, confidences, 0.8, 0.6)
+
+indices = cv2.dnn.NMSBoxes(rects, confidences, 0.6, 0.6)
 
 # merge bounding boxes that are close to each other
 boxes = []
@@ -109,18 +106,24 @@ boxes = sorted(boxes, key=lambda b: (b[1], b[0]))
 boxes = np.array(boxes)
 boxes = boxes[boxes[:, 1].argsort()]
 
-
 for i in range(1, len(boxes)):
-    if boxes[i][1] - boxes[i-1][1] < 10:
-        boxes[i][1] = boxes[i-1][1]
-        boxes[i][3] = boxes[i-1][3]
+    if boxes[i][1] - boxes[i-1][1] < 30:
+        boxes[i][1] = min(boxes[i][1], boxes[i-1][1])
+        boxes[i][3] = max(boxes[i][3], boxes[i-1][3])
         boxes[i][0] = min(boxes[i][0], boxes[i-1][0])
         boxes[i][2] = max(boxes[i][2], boxes[i-1][2])
 
 sorted_rects = [boxes[0]]
 for i in range(1, len(boxes)):
+    print(boxes[i])
     if boxes[i][1] == boxes[i-1][1] and boxes[i][3] == boxes[i-1][3]:
         boxes[i-1][0] = min(boxes[i][0], boxes[i-1][0])
+    elif boxes[i][1] == boxes[i-1][1] and boxes[i][0] == boxes[i-1][0]:
+        boxes[i-1][2] = max(boxes[i][2], boxes[i-1][2])
+        boxes[i-1][3] = max(boxes[i][3], boxes[i-1][3])
+    elif boxes[i][1] == boxes[i-1][1] and boxes[i][2] == boxes[i-1][2]:
+        boxes[i-1][0] = min(boxes[i][0], boxes[i-1][0])
+
     else:
         sorted_rects.append(boxes[i])
 
@@ -134,7 +137,10 @@ for i in sorted_rects:
     end_y = int(end_y * rH)
     cv2.rectangle(orig, (start_x, start_y), (end_x, end_y), (0, 255, 0), 2)
     roi = orig[start_y:end_y, start_x:end_x]
-    (_, text, confidence) = reader.readtext(roi)[0]
+    resp = reader.readtext(roi)
+    if not resp:
+        continue
+    (_, text, confidence) = resp[0]
     print("OCR TEXT: ", text, "Confidence: ", confidence)
     cv2.putText(orig, f"{text}[{confidence:.2f}]", (start_x, start_y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
