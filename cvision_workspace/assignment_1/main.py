@@ -40,12 +40,12 @@ def decode_predictions(scores, geometry, conf_threshold=0.5):
     return rects, confidences
 
 
-reader = easyocr.Reader(['en'])
+reader = easyocr.Reader(['ch_sim', 'en'])
 # Load the pre-trained EAST text detector
 net = cv2.dnn.readNet('./frozen_east_text_detection.pb')
 # Load the image
 st = time.time()
-image = cv2.imread('sample1.jpeg')
+image = cv2.imread('sample3.png')
 orig = image.copy()
 origH, origW = image.shape[:2]
 
@@ -59,22 +59,36 @@ image = cv2.resize(image, (newW, newH))
 (H, W) = image.shape[:2]
 # Convert to grayscale
 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
 # Apply blurring
 blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 # Apply thresholding
-_, thresh = cv2.threshold(blurred, 80, 255, cv2.THRESH_BINARY_INV)
-
+thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 5)
+thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, np.ones((3, 3), dtype=np.int8), iterations=1)
 cv2.imshow('thresh', thresh)
 
-# Traditional method, find contours and draw bounding boxes
+# # Edge detection
+# edges = cv2.Canny(blurred, 20, 150, L2gradient=False)
+# # edges = cv2.dilate(edges, np.ones((3, 3), dtype=np.int8), iterations=1)
+# cv2.imshow('edges', edges)
 #
-# contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+# contours, hierarchy = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 #
-# # Draw bounding boxes
-# for cnt in contours:
-#     x, y, w, h = cv2.boundingRect(cnt)
-#     cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+# # Create an empty image to draw filled contours
+# filled_image = np.zeros_like(edges)
+#
+# # Iterate over contours and their hierarchy
+# for i, contour in enumerate(contours):
+#     color = int(filled_image[contour[0][0][1], contour[0][0][0]])
+#     cv2.drawContours(filled_image, [contour], 0, (255 - color,), thickness=cv2.FILLED)
+# for i, contour in enumerate(contours):
+#     if hierarchy[0][i][3] != -1:
+#         color = int(filled_image[contour[0][0][1], contour[0][0][0]])
+#         if hierarchy[0][hierarchy[0][i][3]][3] != -1 and hierarchy[0][hierarchy[0][hierarchy[0][i][3]][3]][3] != -1:
+#             color = 255 - color
+#         cv2.drawContours(filled_image, [contour], 0, (255 - color,), thickness=cv2.FILLED)
+#
+# filled_image = cv2.GaussianBlur(filled_image, (5, 5), 0)
+# cv2.imshow("filled_image", filled_image)
 
 input_ = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
 
@@ -93,7 +107,7 @@ scores, geometry = net.forward(layer_names)
 
 (rects, confidences) = decode_predictions(scores, geometry)
 
-indices = cv2.dnn.NMSBoxes(rects, confidences, 0.6, 0.6)
+indices = cv2.dnn.NMSBoxes(rects, confidences, 0.3, 0.5)
 
 # merge bounding boxes that are close to each other
 boxes = []
@@ -113,9 +127,9 @@ for i in range(1, len(boxes)):
         boxes[i][0] = min(boxes[i][0], boxes[i-1][0])
         boxes[i][2] = max(boxes[i][2], boxes[i-1][2])
 
+print(boxes)
 sorted_rects = [boxes[0]]
 for i in range(1, len(boxes)):
-    print(boxes[i])
     if boxes[i][1] == boxes[i-1][1] and boxes[i][3] == boxes[i-1][3]:
         boxes[i-1][0] = min(boxes[i][0], boxes[i-1][0])
     elif boxes[i][1] == boxes[i-1][1] and boxes[i][0] == boxes[i-1][0]:
@@ -135,13 +149,13 @@ for i in sorted_rects:
     start_y = int(start_y * rH)
     end_x = int(end_x * rW)
     end_y = int(end_y * rH)
-    cv2.rectangle(orig, (start_x, start_y), (end_x, end_y), (0, 255, 0), 2)
     roi = orig[start_y:end_y, start_x:end_x]
     resp = reader.readtext(roi)
     if not resp:
         continue
     (_, text, confidence) = resp[0]
     print("OCR TEXT: ", text, "Confidence: ", confidence)
+    cv2.rectangle(orig, (start_x, start_y), (end_x, end_y), (0, 255, 0), 2)
     cv2.putText(orig, f"{text}[{confidence:.2f}]", (start_x, start_y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
 ed = time.time()
