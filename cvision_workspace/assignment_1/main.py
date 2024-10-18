@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import cv2
 import numpy as np
 import time
@@ -5,6 +7,8 @@ import PIL.Image
 import PIL.ImageFont
 import PIL.ImageDraw
 import matplotlib.pyplot as plt
+import httpx
+import easyocr
 
 
 # Decode the predictions
@@ -45,10 +49,17 @@ def decode_predictions(scores, geometry, conf_threshold=0.5):
 
 print("Loading the model...")
 
-import easyocr
+
 font = PIL.ImageFont.truetype("simhei.ttf", 20)
 reader = easyocr.Reader(['ch_sim', 'en'])
 # Load the pre-trained EAST text detector
+if not (path := Path('./frozen_east_text_detection.pb')).exists():
+    print("Downloading the model...")
+    url = "https://raw.githubusercontent.com/demuxin/OpenCV_project/refs/heads/master/EAST_Text_Detection/frozen_east_text_detection.pb"
+    with httpx.stream("GET", url) as resp, path.open('wb+') as f:
+        for chunk in resp.iter_bytes():
+            f.write(chunk)
+    print("Model downloaded successfully!")
 net = cv2.dnn.readNet('./frozen_east_text_detection.pb')
 # Get the output layer names
 layer_names = [
