@@ -9,7 +9,7 @@ if __name__ == "__main__":
     # Train the model
     results = model.train(
         data=str(current / "yolo_datasets/fruit.yaml"),
-        epochs=100,
+        epochs=150,
         workers=0,
         device="cuda",
         imgsz=640,

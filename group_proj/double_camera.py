@@ -78,11 +78,7 @@ right_map1, right_map2 = cv2.initUndistortRectifyMap(
     right_camera_matrix, right_distortion, Rr, Pr, size, cv2.CV_32FC1
 )
 
-cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-BM_stereo = cv2.StereoBM.create(numDisparities=16, blockSize=9)
+BM_stereo = cv2.StereoSGBM.create(numDisparities=16, blockSize=9)
 
 disp = np.zeros((480, 640), dtype=np.float32)
 threeD: np.ndarray
@@ -125,14 +121,16 @@ def BM_update(val=0):
     SGBM_blockSize = cv2.getTrackbarPos("blockSize", "SGNM_disparity")
 
     BM_stereo.setBlockSize(2 * SGBM_blockSize + 5)
-    BM_stereo.setROI1(validPixROI1)
-    BM_stereo.setROI2(validPixROI2)
+    # BM_stereo.setROI1(validPixROI1)
+    # BM_stereo.setROI2(validPixROI2)
+    BM_stereo.setP1(8 * 3 * SGBM_blockSize ** 2)
+    BM_stereo.setP2(32 * 3 * SGBM_blockSize ** 2)
     BM_stereo.setPreFilterCap(31)
     BM_stereo.setMinDisparity(0)
     SGBM_num = cv2.getTrackbarPos("num_disp", "SGNM_disparity")
     num_disp = SGBM_num * 16 + 16
     BM_stereo.setNumDisparities(num_disp)
-    BM_stereo.setTextureThreshold(10)
+    # BM_stereo.setTextureThreshold(10)
     BM_stereo.setUniquenessRatio(cv2.getTrackbarPos("unique_Ratio", "SGNM_disparity"))
     BM_stereo.setSpeckleWindowSize(
         100  # cv2.getTrackbarPos("spec_WinSize", "SGNM_disparity")
@@ -156,6 +154,10 @@ def BM_update(val=0):
 
 
 if __name__ == "__main__":
+    cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
     SGBM_blockSize = 7  # 一个匹配块的大小,大于1的奇数
     SGBM_num = 6
     uniquenessRatio = 2
@@ -185,5 +187,5 @@ if __name__ == "__main__":
         elif key & 0xFF == ord("r"):
             print("Resetting")
 
-cv2.destroyAllWindows()  # 关闭所有地窗口
-cap.release()  # 释放摄像头
+    cv2.destroyAllWindows()  # 关闭所有地窗口
+    cap.release()  # 释放摄像头

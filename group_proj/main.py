@@ -1,73 +1,219 @@
 import cv2
-import streamlit as st
+import numpy as np
 from ultralytics import YOLO
 
-# Streamlit 设置
-st.set_page_config(page_title="Group Assignment", page_icon="🧠", layout="wide")
-st.title("Group Assignment")
+left_camera_matrix = np.array(
+    [
+        #                      there should be 0 if calibrate is very correct
+        [4.700848502429587e+02, 0, 5.440618993273372e+02],
+        [0, 4.661448130257676e+02, 3.337074417612100e+02],
+        [0, 0, 1],
+    ], dtype='float64'
+)
 
-# 加载 YOLOv8 模型
-model = YOLO('./fruit3.pt').to('cuda')  # 可以根据需要加载不同的模型
+left_distortion = np.array(
+    [
+        [
+            -0.060004210421966,  # -0.013174360936415,  # k1
+            0.005563217117779,  # 0.217618268684277,  # k2
+            0.001912597679823,  # -0.002462636541929,  # p1
+            0.002983089771792,  # -0.003152044338437,  # p2
+            2.522987648938966e-04,  # -0.530544688052719,  # k3
+        ]
+    ], dtype='float64'
+)
 
-st.session_state["camera_id"] = 0
+right_camera_matrix = np.array(
+    [
+        #                      there should be 0 if calibrate is very correct
+        [4.651381033054275e+02, 0, 5.453743178709904e+02],
+        [0, 4.601398341497697e+02, 3.409474852228430e+02],
+        [0, 0, 1],
+    ], dtype='float64'
+)
 
-# 获取可用摄像头数量
-camera_count = 0
+right_distortion = np.array(
+    [
+        [
+            -0.058759049853852,  # -0.010701696628130,  # k1
+            0.005998962391883,  # 0.213264008998207,  # k2
+            0.001981457940990,  # -0.002422861971945,  # p1
+            0.003174101066657,  # -0.002357193114398,  # p2
+            0.001130768555751,  # -0.540114506676907,  # k3
+        ]
+    ], dtype='float64'
+)
 
-for i in range(4):
-    cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-    if cap.isOpened():
-        camera_count += 1
-    cap.release()
+rec = np.array(
+    [
+        [0.999763224899467, -5.720570423647862e-04, -0.021752399622971],
+        [5.463956709250523e-04, 0.999999147868492, -0.001185628128796],
+        [0.021753059333987, 0.001173461984591, 0.999762685539215],
+    ]
+)
 
-# 选择摄像头
-st.session_state["camera_id"] = st.selectbox("选择摄像头", list(range(camera_count)))
+R = cv2.Rodrigues(rec)[0]
 
-cap = cv2.VideoCapture(st.session_state["camera_id"], cv2.CAP_DSHOW)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 2560)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 960)
+# T = np.array([[-61.507817546611020], [-1.375821012862682], [-3.341776157686859]])
+T = np.array([[-63.101700017582100], [1.753679016270766], [-1.741524521448996]])
+size = (640, 480)  # 图像尺寸
+
+# 进行立体更正, bouguet标定方法
+Rl, Rr, Pl, Pr, Q, validPixROI1, validPixROI2 = cv2.stereoRectify(
+    left_camera_matrix,
+    left_distortion,
+    right_camera_matrix,
+    right_distortion,
+    size,
+    R,
+    T,
+    flags=cv2.CALIB_ZERO_DISPARITY,
+    alpha=0,
+)
+# 计算更正map
+left_map1, left_map2 = cv2.initUndistortRectifyMap(
+    left_camera_matrix, left_distortion, Rl, Pl, size, cv2.CV_32FC1
+)
+right_map1, right_map2 = cv2.initUndistortRectifyMap(
+    right_camera_matrix, right_distortion, Rr, Pr, size, cv2.CV_32FC1
+)
+
+BM_stereo = cv2.StereoSGBM.create(numDisparities=16, blockSize=9)
+
+# disp = np.zeros((480, 640), dtype=np.float32)
+threeD: np.ndarray
 
 
-# 设置框架布局
-frame_window = st.image([])
+def callback(x, y):
+    global threeD
+    # num = disp[y][x]
+    #
+    # print(num)
+    # _tmp = abs(T[0]) * Q[2][3] / abs(num)
+    # print("distance: ", _tmp / 10, "cm")
 
-# 主循环
-if not cap.isOpened():
-    st.error("无法读取摄像头")
-else:
+        # point3 = threeD[_y][_x]
+        # print("world coordinate: ")
+        # print("x: ", point3[0], "y: ", point3[1], "z: ", point3[2])
+        # d = point3[0] ** 2 + point3[1] ** 2 + point3[2] ** 2
+        # d **= 0.5
+        # d /= 10
+        # print("distance: ", d, "cm")
+    try:
+        point3 = threeD[y][x]
+    except IndexError:
+        return float('inf')
+    print("world coordinate: ")
+    print("x: ", point3[0], "y: ", point3[1], "z: ", point3[2])
+    d = (point3[0] ** 2) + (point3[1] ** 2) + (point3[2] ** 2)
+    d **= 0.5
+    d /= 10
+    d *= (100/120)
+    print("distance: ", d, "cm")
+    return d
+
+
+def BM_update(val=0):
+    global SGBM_num
+    global SGBM_blockSize
+    global BM_stereo
+    global threeD
+    SGBM_blockSize = cv2.getTrackbarPos("blockSize", "SGNM_disparity")
+
+    BM_stereo.setBlockSize(2 * SGBM_blockSize + 5)
+    # BM_stereo.setROI1(validPixROI1)
+    # BM_stereo.setROI2(validPixROI2)
+    BM_stereo.setP1(8 * 1 * SGBM_blockSize ** 2)
+    BM_stereo.setP2(32 * 1 * SGBM_blockSize ** 2)
+    BM_stereo.setPreFilterCap(31)
+    BM_stereo.setMinDisparity(0)
+    SGBM_num = cv2.getTrackbarPos("num_disp", "SGNM_disparity")
+    num_disp = SGBM_num * 16 + 16
+    BM_stereo.setNumDisparities(num_disp)
+    # BM_stereo.setTextureThreshold(10)
+    BM_stereo.setUniquenessRatio(cv2.getTrackbarPos("unique_Ratio", "SGNM_disparity"))
+    BM_stereo.setSpeckleWindowSize(
+        100  # cv2.getTrackbarPos("spec_WinSize", "SGNM_disparity")
+    )
+    BM_stereo.setSpeckleRange(32)  # cv2.getTrackbarPos("spec_Range", "SGNM_disparity")
+    BM_stereo.setDisp12MaxDiff(-1)
+    left_image_down = cv2.pyrDown(imgL_gray)
+    right_image_down = cv2.pyrDown(imgR_gray)
+    factor = imgL_gray.shape[1] / left_image_down.shape[1]
+    disparity_left_half = BM_stereo.compute(left_image_down, right_image_down)
+    disparity_left = cv2.resize(disparity_left_half, size, interpolation=cv2.INTER_AREA)
+    disparity_left = factor * disparity_left
+    disparity_left = disparity_left.astype(np.float32)
+    threeD = cv2.reprojectImageTo3D(disparity_left, Q, handleMissingValues=False)
+    threeD = threeD * 16
+    disp = disparity_left / 16.0 / num_disp
+    disp = cv2.medianBlur(disp, 5)
+    # cv2.imshow("SGNM_disparity", disp / num_disp)
+    disp_color = cv2.normalize(disp, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    disp_color = cv2.applyColorMap(disp_color.astype(np.uint8), cv2.COLORMAP_JET)
+    cv2.imshow("SGNM_disparity", disp_color)
+
+
+if __name__ == "__main__":
+    model = YOLO('./fruit3.pt').to('cuda')
+
+    cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+    SGBM_blockSize = 6  # 一个匹配块的大小,大于1的奇数
+    SGBM_num = 3
+    uniquenessRatio = 2
+    # 创建窗口
+    cv2.namedWindow("SGNM_disparity")
+    cv2.createTrackbar("blockSize", "SGNM_disparity", SGBM_blockSize, 8, BM_update)
+    cv2.createTrackbar("num_disp", "SGNM_disparity", SGBM_num, 16, BM_update)
+    cv2.createTrackbar(
+        "unique_Ratio", "SGNM_disparity", uniquenessRatio, 50, BM_update
+    )
     while True:
-        # ret, frame = cap.read()
         ret, frame = cap.read()
-        frame = frame[:, 0:1280, :]
-        if not ret:
-            st.error("无法从摄像头获取帧")
-            break
-
-        # 应用 YOLOv8 进行检测
-        results = model.predict(frame, conf=0.6, iou=0.5)
-
-        # 绘制检测结果
+        frame1 = frame[:, 0:640, :]
+        frame2 = frame[:, 640:1280, :]
+        imgL = cv2.remap(frame1, left_map1, left_map2, cv2.INTER_LINEAR)
+        imgR = cv2.remap(frame2, right_map1, right_map2, cv2.INTER_LINEAR)
+        results = model.predict(imgL, conf=0.6, iou=0.5)
+        if not results:
+            continue
+        imgL_gray = cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY)
+        imgR_gray = cv2.cvtColor(imgR, cv2.COLOR_BGR2GRAY)
+        size = (imgL.shape[1], imgL.shape[0])
+        # cv2.imshow("left", imgL)
+        # cv2.imshow("right", imgR)
+        BM_update()
         for result in results:
-            if result.boxes is not None:
-                frame = result.plot(img=frame)
-                # for i, xyxy in enumerate(result.boxes.xyxy):
-                #     x1, y1, x2, y2 = map(int, xyxy)
-                #     frame = cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                #     frame = cv2.putText(
-                #         frame,
-                #         f"{result.names[int(result.boxes.cls[i])]}: {result.boxes.conf[i]:.2f}",
-                #         (x1, y1 - 10),
-                #         cv2.FONT_HERSHEY_SIMPLEX,
-                #         0.5,
-                #         (0, 255, 0),
-                #         2
-                #     )
+            for i, xyxy in enumerate(result.boxes.xyxy):
+                x1, y1, x2, y2 = map(int, xyxy)
+                xc = (x1 + x2) // 2
+                yc = (y1 + y2) // 2
+                dis = callback(xc, yc)
+                dis1 = callback(x1 - 10, y1)
+                dis2 = callback(x2 + 10, y2)
+                dis3 = callback(x1, y2 + 10)
+                dis4 = callback(x2, y1 - 10)
+                dis = min(dis, dis1, dis2, dis3, dis4)
+                imgL = cv2.rectangle(imgL, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                imgL = cv2.circle(imgL, (xc, yc), 2, (0, 0, 255), 2)
+                imgL = cv2.putText(
+                    imgL,
+                    f"{result.names[int(result.boxes.cls[i])]}: {dis:.2f} cm",
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    2
+                )
+        cv2.imshow("left", imgL)
+        key = cv2.waitKey(1)
+        if key & 0xFF in (27, ord("q")):
+            break
+        elif key & 0xFF == ord("r"):
+            print("Resetting")
 
-        # OpenCV 是 BGR，Streamlit 需要 RGB，因此需要转换颜色格式
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # 显示帧
-        frame_window.image(frame, channels='RGB')
-
-# 释放资源
-cap.release()
+    cv2.destroyAllWindows()  # 关闭所有地窗口
+    cap.release()  # 释放摄像头
