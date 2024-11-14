@@ -5,6 +5,7 @@ from PIL import Image
 import json
 
 
+# Change the path to the folder where the origin images are stored
 fruit_path = Path(r"C:\Users\TR\Desktop\python\fruit1")
 
 datasets_path = Path("./yolo_datasets")
@@ -165,8 +166,8 @@ for i, file in enumerate(vals):
 
 print(classes)
 
-template = """\
-path: C://Users/TR/Desktop/python/cvison/assignment1/cvision_workspace/group_assignment/yolo_datasets
+template = f"""\
+path: {datasets_path.absolute().as_posix()}
 train: images/train
 val: images/val
 test: images/test
