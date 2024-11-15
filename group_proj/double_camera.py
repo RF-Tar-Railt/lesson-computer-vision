@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
-
+from ultralytics import YOLO
+import time
 
 left_camera_matrix = np.array(
     [
@@ -80,36 +81,37 @@ right_map1, right_map2 = cv2.initUndistortRectifyMap(
 
 BM_stereo = cv2.StereoSGBM.create(numDisparities=16, blockSize=9)
 
-disp = np.zeros((480, 640), dtype=np.float32)
+# disp = np.zeros((480, 640), dtype=np.float32)
 threeD: np.ndarray
 
 
-def callback(e, x, y, f, p):
+def callback(x, y):
     global threeD
-    global disp
-    if e == cv2.EVENT_LBUTTONDOWN:
-        #for _x, _y in [(x, y), (x + 10, y + 10), (x - 10, y - 10), (x + 10, y - 10), (x - 10, y + 10)]:
-        num = disp[y][x]
+    # num = disp[y][x]
+    #
+    # print(num)
+    # _tmp = abs(T[0]) * Q[2][3] / abs(num)
+    # print("distance: ", _tmp / 10, "cm")
 
-        print(num)
-        _tmp = abs(T[0]) * Q[2][3] / abs(num)
-        print("distance: ", _tmp / 10, "cm")
-
-            # point3 = threeD[_y][_x]
-            # print("world coordinate: ")
-            # print("x: ", point3[0], "y: ", point3[1], "z: ", point3[2])
-            # d = point3[0] ** 2 + point3[1] ** 2 + point3[2] ** 2
-            # d **= 0.5
-            # d /= 10
-            # print("distance: ", d, "cm")
+        # point3 = threeD[_y][_x]
+        # print("world coordinate: ")
+        # print("x: ", point3[0], "y: ", point3[1], "z: ", point3[2])
+        # d = point3[0] ** 2 + point3[1] ** 2 + point3[2] ** 2
+        # d **= 0.5
+        # d /= 10
+        # print("distance: ", d, "cm")
+    try:
         point3 = threeD[y][x]
-        print("world coordinate: ")
-        print("x: ", point3[0], "y: ", point3[1], "z: ", point3[2])
-        d = (point3[0] ** 2) + (point3[1] ** 2) + (point3[2] ** 2)
-        d **= 0.5
-        d /= 10
-        d *= (100/120)
-        print("distance: ", d, "cm")
+    except IndexError:
+        return float('inf')
+    print("world coordinate: ")
+    print("x: ", point3[0], "y: ", point3[1], "z: ", point3[2])
+    d = (point3[0] ** 2) + (point3[1] ** 2) + (point3[2] ** 2)
+    d **= 0.5
+    d /= 10
+    d *= (100/120)
+    print("distance: ", d, "cm")
+    return d
 
 
 def BM_update(val=0):
@@ -117,14 +119,13 @@ def BM_update(val=0):
     global SGBM_blockSize
     global BM_stereo
     global threeD
-    global disp
     SGBM_blockSize = cv2.getTrackbarPos("blockSize", "SGNM_disparity")
 
     BM_stereo.setBlockSize(2 * SGBM_blockSize + 5)
     # BM_stereo.setROI1(validPixROI1)
     # BM_stereo.setROI2(validPixROI2)
-    BM_stereo.setP1(8 * 3 * SGBM_blockSize ** 2)
-    BM_stereo.setP2(32 * 3 * SGBM_blockSize ** 2)
+    BM_stereo.setP1(8 * 1 * SGBM_blockSize ** 2)
+    BM_stereo.setP2(32 * 1 * SGBM_blockSize ** 2)
     BM_stereo.setPreFilterCap(31)
     BM_stereo.setMinDisparity(0)
     SGBM_num = cv2.getTrackbarPos("num_disp", "SGNM_disparity")
@@ -137,29 +138,32 @@ def BM_update(val=0):
     )
     BM_stereo.setSpeckleRange(32)  # cv2.getTrackbarPos("spec_Range", "SGNM_disparity")
     BM_stereo.setDisp12MaxDiff(-1)
-    left_image_down = cv2.pyrDown(imgL)
-    right_image_down = cv2.pyrDown(imgR)
-    factor = imgL.shape[1] / left_image_down.shape[1]
+    left_image_down = cv2.pyrDown(imgL_gray)
+    right_image_down = cv2.pyrDown(imgR_gray)
+    factor = imgL_gray.shape[1] / left_image_down.shape[1]
     disparity_left_half = BM_stereo.compute(left_image_down, right_image_down)
     disparity_left = cv2.resize(disparity_left_half, size, interpolation=cv2.INTER_AREA)
     disparity_left = factor * disparity_left
     disparity_left = disparity_left.astype(np.float32)
-    disp = disparity_left / 16.0
-    disp = cv2.medianBlur(disp, 5)
     threeD = cv2.reprojectImageTo3D(disparity_left, Q, handleMissingValues=False)
     threeD = threeD * 16
-    cv2.imshow("SGNM_disparity", disp / num_disp)
-    # disp_color = cv2.normalize(disp, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-    # disp_color = cv2.applyColorMap(disp_color.astype(np.uint8), cv2.COLORMAP_JET)
+    disp = disparity_left / 16.0 / num_disp
+    disp = cv2.medianBlur(disp, 5)
+    # cv2.imshow("SGNM_disparity", disp / num_disp)
+    disp_color = cv2.normalize(disp, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    disp_color = cv2.applyColorMap(disp_color.astype(np.uint8), cv2.COLORMAP_JET)
+    cv2.imshow("SGNM_disparity", disp_color)
 
 
 if __name__ == "__main__":
+    model = YOLO('./fruit3/train3/weights/epoch60.pt').to('cuda')
+
     cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    SGBM_blockSize = 7  # 一个匹配块的大小,大于1的奇数
-    SGBM_num = 6
+    SGBM_blockSize = 6  # 一个匹配块的大小,大于1的奇数
+    SGBM_num = 3
     uniquenessRatio = 2
     # 创建窗口
     cv2.namedWindow("SGNM_disparity")
@@ -172,15 +176,51 @@ if __name__ == "__main__":
         ret, frame = cap.read()
         frame1 = frame[:, 0:640, :]
         frame2 = frame[:, 640:1280, :]
-        imgL = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
-        imgR = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-        imgL = cv2.remap(imgL, left_map1, left_map2, cv2.INTER_LINEAR)
-        imgR = cv2.remap(imgR, right_map1, right_map2, cv2.INTER_LINEAR)
+        start = time.time()
+        imgL = cv2.remap(frame1, left_map1, left_map2, cv2.INTER_LINEAR)
+        imgR = cv2.remap(frame2, right_map1, right_map2, cv2.INTER_LINEAR)
+        results = model.predict(imgL, conf=0.6, iou=0.5)
+        if not results:
+            continue
+        imgL_gray = cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY)
+        imgR_gray = cv2.cvtColor(imgR, cv2.COLOR_BGR2GRAY)
         size = (imgL.shape[1], imgL.shape[0])
-        cv2.imshow("left", imgL)
-        cv2.imshow("right", imgR)
-        cv2.setMouseCallback("left", callback, None)
+        # cv2.imshow("left", imgL)
+        # cv2.imshow("right", imgR)
         BM_update()
+        for result in results:
+            for i, xyxy in enumerate(result.boxes.xyxy):
+                x1, y1, x2, y2 = map(int, xyxy)
+                xc = (x1 + x2) // 2
+                yc = (y1 + y2) // 2
+                dis = callback(xc, yc)
+                dis1 = callback(x1 - 10, y1)
+                dis2 = callback(x2 + 10, y2)
+                dis3 = callback(x1, y2 + 10)
+                dis4 = callback(x2, y1 - 10)
+                dis = min(dis, dis1, dis2, dis3, dis4)
+                imgL = cv2.rectangle(imgL, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                imgL = cv2.circle(imgL, (xc, yc), 2, (0, 0, 255), 2)
+                imgL = cv2.putText(
+                    imgL,
+                    f"{result.names[int(result.boxes.cls[i])]}: {dis:.2f} cm",
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    2
+                )
+        end = time.time()
+        imgL = cv2.putText(
+            imgL,
+            f"FPS: {1 / (end - start):.2f}",
+            (10, 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 0, 0),
+            2
+        )
+        cv2.imshow("left", imgL)
         key = cv2.waitKey(1)
         if key & 0xFF in (27, ord("q")):
             break

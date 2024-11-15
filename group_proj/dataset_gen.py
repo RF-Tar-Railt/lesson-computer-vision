@@ -6,7 +6,7 @@ import json
 
 
 # Change the path to the folder where the origin images are stored
-fruit_path = Path(r"C:\Users\TR\Desktop\python\fruit1")
+fruit_path = Path("./origin")
 
 datasets_path = Path("./yolo_datasets")
 images_path = datasets_path / "images"
